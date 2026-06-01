@@ -1,0 +1,624 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Role {
+  SUPER_ADMIN
+  IT_ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  ON_LEAVE
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  IN_REPAIR
+  IN_MAINTENANCE
+  RETIRED
+  LOST
+  DISPOSED
+  DAMAGED
+}
+
+enum AssetCondition {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum AssetCategory {
+  LAPTOP
+  DESKTOP
+  SERVER
+  MONITOR
+  PRINTER
+  NETWORKING
+  MOBILE_PHONE
+  TABLET
+  PERIPHERAL
+  OTHER
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  EXPIRING_SOON
+  SUSPENDED
+  RETIRED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED_BY_MANAGER
+  APPROVED_BY_IT
+  REJECTED
+  ASSIGNED
+  CANCELLED
+}
+
+enum RequestType {
+  NEW_ASSET
+  REPAIR
+  REPLACEMENT
+  UPGRADE
+  RETURN
+}
+
+enum ApprovalStage {
+  MANAGER_APPROVAL
+  IT_ADMIN_APPROVAL
+  COMPLETED
+  REJECTED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IncidentCategory {
+  HARDWARE_FAILURE
+  SOFTWARE_ISSUE
+  NETWORK_ISSUE
+  PERFORMANCE_ISSUE
+  OTHER
+}
+
+enum MaintenanceType {
+  PREVENTIVE
+  CORRECTIVE
+  EMERGENCY
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  ASSIGN
+  UNASSIGN
+  STATUS_CHANGE
+  LOGIN
+  LOGOUT
+  EXPORT
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+enum NotificationType {
+  ASSET_ASSIGNED
+  ASSET_UNASSIGNED
+  LICENSE_EXPIRING
+  LICENSE_EXPIRED
+  MAINTENANCE_SCHEDULED
+  INCIDENT_REPORTED
+  REQUEST_APPROVED
+  REQUEST_REJECTED
+  REQUEST_ASSIGNED
+  AUDIT_ALERT
+}
+
+// ============================================================================
+// CORE MODELS
+// ============================================================================
+
+model User {
+  id            String        @id @default(uuid())
+  name          String
+  email         String        @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  role          Role          @default(EMPLOYEE)
+  status        UserStatus    @default(ACTIVE)
+  departmentId  String?
+  managerId     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?     // Soft delete
+
+  // Relations
+  department           Department?           @relation("DepartmentUsers", fields: [departmentId], references: [id], onDelete: SetNull)
+  manager              User?                 @relation("ManagerRelation", fields: [managerId], references: [id], onDelete: SetNull)
+  subordinates         User[]                @relation("ManagerRelation")
+  accounts             Account[]
+  sessions             Session[]
+  assignedAssets       AssetAssignment[]     @relation("AssignedUser")
+  createdAssets        Asset[]               @relation("CreatedByUser")
+  updatedAssets        Asset[]               @relation("UpdatedByUser")
+  createdRequests      AssetRequest[]        @relation("RequestedByUser")
+  approvedRequests     AssetRequest[]        @relation("ApprovedByUser")
+  assignedByRequests   AssetRequest[]        @relation("AssignedByUser")
+  createdIncidents     Incident[]            @relation("ReportedByUser")
+  assignedIncidents    Incident[]            @relation("AssignedToUser")
+  resolvedIncidents    Incident[]            @relation("ResolvedByUser")
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+
+  @@index([email])
+  @@index([departmentId])
+  @@index([managerId])
+  @@index([deletedAt])
+}
+
+model Department {
+  id            String        @id @default(uuid())
+  name          String        @unique
+  code          String        @unique
+  description   String?
+  parentId      String?
+  budget        Decimal       @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?     // Soft delete
+
+  // Relations
+  parent        Department?   @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Department[]  @relation("DepartmentHierarchy")
+  users         User[]        @relation("DepartmentUsers")
+  assets        Asset[]       @relation("DepartmentAssets")
+
+  @@index([parentId])
+  @@index([deletedAt])
+}
+
+// ============================================================================
+// ASSET MANAGEMENT MODELS
+// ============================================================================
+
+model AssetCategory {
+  id            String        @id @default(uuid())
+  name          AssetCategory @unique
+  description   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?     // Soft delete
+
+  // Relations
+  assets        Asset[]
+
+  @@index([deletedAt])
+}
+
+model Asset {
+  id                String              @id @default(uuid())
+  assetTag          String              @unique
+  assetId           String?             @unique  // Custom asset ID
+  serialNumber      String              @unique
+  category          AssetCategory       @relation(fields: [categoryId], references: [name], onDelete: Restrict)
+  categoryId        String
+  brand             String
+  model             String
+  purchaseDate      DateTime
+  warrantyExpiry    DateTime?
+  cost              Decimal
+  status            AssetStatus         @default(AVAILABLE)
+  condition         AssetCondition      @default(GOOD)
+  location          String              // Physical location
+  notes             String?
+  photoUrl          String?
+  qrCodeUrl         String?
+  departmentId      String?
+  vendorId          String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  deletedAt         DateTime?           // Soft delete
+  createdBy         String
+  updatedBy         String
+  lastMaintenanceDate DateTime?
+  depreciationRate  Decimal             @default(15) // Annual depreciation percentage
+
+  // Relations
+  department        Department?         @relation("DepartmentAssets", fields: [departmentId], references: [id], onDelete: SetNull)
+  vendor            Vendor?             @relation("VendorAssets", fields: [vendorId], references: [id], onDelete: SetNull)
+  createdByUser     User                @relation("CreatedByUser", fields: [createdBy], references: [id], onDelete: Restrict)
+  updatedByUser     User                @relation("UpdatedByUser", fields: [updatedBy], references: [id], onDelete: Restrict)
+  assignments       AssetAssignment[]
+  licenses          SoftwareLicense[]   @relation("AssetLicenses")
+  maintenanceRecords MaintenanceRecord[]
+  incidents         Incident[]          @relation("IncidentAsset")
+  auditLogs         AuditLog[]          @relation("AssetAuditLog")
+
+  @@index([assetTag])
+  @@index([serialNumber])
+  @@index([categoryId])
+  @@index([status])
+  @@index([departmentId])
+  @@index([vendorId])
+  @@index([deletedAt])
+  @@index([createdBy])
+  @@index([updatedBy])
+}
+
+model AssetAssignment {
+  id                String        @id @default(uuid())
+  assetId           String
+  userId            String
+  assignmentDate    DateTime      @default(now())
+  unassignmentDate  DateTime?
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?     // Soft delete
+
+  // Relations
+  asset             Asset         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user              User          @relation("AssignedUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, userId, unassignmentDate]) // Only one active assignment per asset-user
+  @@index([assetId])
+  @@index([userId])
+  @@index([assignmentDate])
+  @@index([deletedAt])
+}
+
+model SoftwareLicense {
+  id                String          @id @default(uuid())
+  softwareName      String
+  vendor            String
+  licenseKey        String          @unique
+  licenseType       String          // e.g., "Per User", "Per Device", "Volume"
+  numberOfSeats     Int
+  assignedSeats     Int             @default(0)
+  expirationDate    DateTime
+  cost              Decimal
+  renewalDate       DateTime?
+  status            LicenseStatus   @default(ACTIVE)
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deletedAt         DateTime?       // Soft delete
+  vendorId          String?
+  assetId           String?
+
+  // Relations
+  vendor            Vendor?         @relation("VendorLicenses", fields: [vendorId], references: [id], onDelete: SetNull)
+  asset             Asset?          @relation("AssetLicenses", fields: [assetId], references: [id], onDelete: SetNull)
+  auditLogs         AuditLog[]      @relation("LicenseAuditLog")
+
+  @@index([softwareName])
+  @@index([licenseKey])
+  @@index([expirationDate])
+  @@index([status])
+  @@index([vendorId])
+  @@index([assetId])
+  @@index([deletedAt])
+}
+
+model Vendor {
+  id                String        @id @default(uuid())
+  name              String        @unique
+  contactPerson     String?
+  email             String?
+  phone             String?
+  website           String?
+  address           String?
+  city              String?
+  country           String?
+  taxId             String?       // VAT/Tax ID
+  supportEmail      String?
+  supportPhone      String?
+  slaTerms          String?       // Service Level Agreement
+  paymentTerms      String?
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?     // Soft delete
+
+  // Relations
+  assets            Asset[]       @relation("VendorAssets")
+  licenses          SoftwareLicense[] @relation("VendorLicenses")
+  maintenanceContracts MaintenanceRecord[] @relation("VendorMaintenance")
+
+  @@index([name])
+  @@index([email])
+  @@index([deletedAt])
+}
+
+// ============================================================================
+// MAINTENANCE & SERVICE MODELS
+// ============================================================================
+
+model MaintenanceRecord {
+  id                String            @id @default(uuid())
+  assetId           String
+  vendorId          String?
+  maintenanceType   MaintenanceType   @default(PREVENTIVE)
+  status            MaintenanceStatus @default(SCHEDULED)
+  scheduledDate     DateTime
+  completedDate     DateTime?
+  cost              Decimal?
+  description       String
+  notes             String?
+  technician        String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?         // Soft delete
+
+  // Relations
+  asset             Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  vendor            Vendor?           @relation("VendorMaintenance", fields: [vendorId], references: [id], onDelete: SetNull)
+
+  @@index([assetId])
+  @@index([status])
+  @@index([scheduledDate])
+  @@index([vendorId])
+  @@index([deletedAt])
+}
+
+// ============================================================================
+// ASSET REQUEST & APPROVAL MODELS
+// ============================================================================
+
+model AssetRequest {
+  id                String              @id @default(uuid())
+  requestNumber     String              @unique
+  requestedBy       String
+  requestType       RequestType         @default(NEW_ASSET)
+  assetCategory     AssetCategory?      @relation(fields: [assetCategoryId], references: [name], onDelete: SetNull)
+  assetCategoryId   String?
+  status            RequestStatus       @default(PENDING)
+  description       String
+  justification     String?
+  priority          String              @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  budget            Decimal?
+  approvedBy        String?
+  approvalNotes     String?
+  assignedBy        String?
+  assetId           String?
+  departmentId      String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  dueDate           DateTime?
+  deletedAt         DateTime?           // Soft delete
+
+  // Relations
+  requestedByUser   User                @relation("RequestedByUser", fields: [requestedBy], references: [id], onDelete: Restrict)
+  approvedByUser    User?               @relation("ApprovedByUser", fields: [approvedBy], references: [id], onDelete: SetNull)
+  assignedByUser    User?               @relation("AssignedByUser", fields: [assignedBy], references: [id], onDelete: SetNull)
+  approvalWorkflows ApprovalWorkflow[]
+  auditLogs         AuditLog[]          @relation("RequestAuditLog")
+
+  @@index([requestNumber])
+  @@index([requestedBy])
+  @@index([status])
+  @@index([approvedBy])
+  @@index([departmentId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model ApprovalWorkflow {
+  id                String            @id @default(uuid())
+  requestId         String
+  stage             ApprovalStage     @default(MANAGER_APPROVAL)
+  approverRole      Role
+  approverNotes     String?
+  status            RequestStatus     @default(PENDING)
+  actionDate        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  request           AssetRequest      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, stage])
+  @@index([requestId])
+  @@index([stage])
+  @@index([approverRole])
+}
+
+// ============================================================================
+// INCIDENT MANAGEMENT MODELS
+// ============================================================================
+
+model Incident {
+  id                String            @id @default(uuid())
+  incidentNumber    String            @unique
+  title             String
+  description       String
+  category          IncidentCategory  @default(HARDWARE_FAILURE)
+  severity          IncidentSeverity  @default(MEDIUM)
+  status            IncidentStatus    @default(OPEN)
+  reportedBy        String
+  assetId           String?
+  assignedTo        String?
+  resolvedBy        String?
+  resolutionNotes   String?
+  reportedDate      DateTime          @default(now())
+  resolvedDate      DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?         // Soft delete
+
+  // Relations
+  reportedByUser    User              @relation("ReportedByUser", fields: [reportedBy], references: [id], onDelete: Restrict)
+  asset             Asset?            @relation("IncidentAsset", fields: [assetId], references: [id], onDelete: SetNull)
+  assignedToUser    User?             @relation("AssignedToUser", fields: [assignedTo], references: [id], onDelete: SetNull)
+  resolvedByUser    User?             @relation("ResolvedByUser", fields: [resolvedBy], references: [id], onDelete: SetNull)
+  auditLogs         AuditLog[]        @relation("IncidentAuditLog")
+
+  @@index([incidentNumber])
+  @@index([status])
+  @@index([severity])
+  @@index([reportedBy])
+  @@index([assetId])
+  @@index([assignedTo])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+// ============================================================================
+// AUDIT & LOGGING MODELS
+// ============================================================================
+
+model AuditLog {
+  id                String        @id @default(uuid())
+  userId            String
+  action            AuditAction
+  entityType        String        // e.g., "Asset", "User", "AssetRequest"
+  entityId          String?
+  oldValues         String?       // JSON stringified
+  newValues         String?       // JSON stringified
+  description       String?
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime      @default(now())
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset             Asset?        @relation("AssetAuditLog", fields: [entityId], references: [id], onDelete: SetNull)
+  license           SoftwareLicense? @relation("LicenseAuditLog", fields: [entityId], references: [id], onDelete: SetNull)
+  request           AssetRequest? @relation("RequestAuditLog", fields: [entityId], references: [id], onDelete: SetNull)
+  incident          Incident?     @relation("IncidentAuditLog", fields: [entityId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// NOTIFICATION MODEL
+// ============================================================================
+
+model Notification {
+  id                String              @id @default(uuid())
+  userId            String
+  type              NotificationType
+  title             String
+  message           String
+  relatedEntityType String?             // e.g., "Asset", "AssetRequest", "Incident"
+  relatedEntityId   String?
+  status            NotificationStatus  @default(UNREAD)
+  actionUrl         String?
+  createdAt         DateTime            @default(now())
+  readAt            DateTime?
+  archivedAt        DateTime?
+  deletedAt         DateTime?           // Soft delete
+
+  // Relations
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+// ============================================================================
+// AUTHENTICATION MODELS (Auth.js)
+// ============================================================================
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String  @map("user_id")
+  type               String
+  provider           String
+  providerAccountId  String  @map("provider_account_id")
+  refresh_token      String?  @db.Text
+  access_token       String?  @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique  @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================================
+// DEPRECATED: Role and RolePermission (keeping for reference)
+// ============================================================================
+
+model RolePermission {
+  id          String   @id @default(uuid())
+  role        Role
+  permission  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([role, permission])
+}
