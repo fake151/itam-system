@@ -1,0 +1,100 @@
+// Asset Assignment Request Status
+enum AssignmentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+// Assignment Action Type
+enum AssignmentActionType {
+  ASSIGN
+  RETURN
+  TRANSFER
+}
+
+// Asset Assignment Request - Workflow for asset assignments
+model AssetAssignmentRequest {
+  id                String                    @id @default(uuid())
+  requestNumber     String                    @unique
+  assetId           String
+  currentUserId     String?
+  requestedUserId   String
+  actionType        AssignmentActionType      @default(ASSIGN)
+  status            AssignmentRequestStatus   @default(PENDING)
+  reason            String?
+  approverNotes     String?
+  approvedBy        String?
+  rejectedBy        String?
+  rejectionReason   String?
+  completedAt       DateTime?
+  requestedAt       DateTime                  @default(now())
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  deletedAt         DateTime?                 // Soft delete
+
+  // Relations
+  asset             Asset                     @relation("AssignmentRequests", fields: [assetId], references: [id], onDelete: Cascade)
+  currentUser       User?                     @relation("AssignmentRequestCurrentUser", fields: [currentUserId], references: [id], onDelete: SetNull)
+  requestedUser     User                      @relation("AssignmentRequestRequestedUser", fields: [requestedUserId], references: [id], onDelete: Restrict)
+  approver          User?                     @relation("AssignmentRequestApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  rejector          User?                     @relation("AssignmentRequestRejector", fields: [rejectedBy], references: [id], onDelete: SetNull)
+  timeline          AssetAssignmentTimeline[]
+
+  @@index([requestNumber])
+  @@index([assetId])
+  @@index([requestedUserId])
+  @@index([currentUserId])
+  @@index([status])
+  @@index([actionType])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+// Asset Assignment Timeline - Track all assignment changes
+model AssetAssignmentTimeline {
+  id                        String                   @id @default(uuid())
+  assetAssignmentId         String
+  action                    AssignmentActionType
+  description               String
+  performedBy               String
+  previousUserId            String?
+  newUserId                 String?
+  notes                     String?
+  createdAt                 DateTime                 @default(now())
+
+  // Relations
+  assetAssignment           AssetAssignment          @relation(fields: [assetAssignmentId], references: [id], onDelete: Cascade)
+  performedByUser           User                     @relation("TimelinePerformedBy", fields: [performedBy], references: [id], onDelete: Restrict)
+
+  @@index([assetAssignmentId])
+  @@index([action])
+  @@index([performedBy])
+  @@index([createdAt])
+}
+
+// Update Asset model to include assignment relationship
+model Asset {
+  // ... existing fields ...
+  assignmentStatus          String?                  @default("UNASSIGNED")
+  lastAssignmentDate        DateTime?
+  lastAssignmentBy          String?
+
+  // ... existing relations ...
+  assignmentRequests        AssetAssignmentRequest[] @relation("AssignmentRequests")
+}
+
+// Update User model to include assignment relationships
+model User {
+  // ... existing fields ...
+
+  // Relations for assignment workflow
+  assignmentRequestsCreated    AssetAssignmentRequest[]  @relation("AssignmentRequestRequestedUser")
+  assignmentRequestsApproved   AssetAssignmentRequest[]  @relation("AssignmentRequestApprover")
+  assignmentRequestsRejected   AssetAssignmentRequest[]  @relation("AssignmentRequestRejector")
+  assignmentRequestsCurrent    AssetAssignmentRequest[]  @relation("AssignmentRequestCurrentUser")
+  assignmentTimeline           AssetAssignmentTimeline[] @relation("TimelinePerformedBy")
+}
